@@ -1,0 +1,511 @@
+#include "Arduino.h"
+#include "Audio.h"
+#include "WiFi.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+#include "include/welcomeScreen.h"
+#include "include/speaker0.h"
+#include "include/speaker1.h"
+#include "include/speaker2.h"
+#include "include/speaker3.h"
+#include "include/wifi_icon.h"
+
+String ssid = "Soldered";
+String password = "dasduino";
+
+// Digital I/O used
+#define SPI_MOSI 23
+#define SPI_SCK 18
+#define I2S_DOUT      25
+#define I2S_BCLK      26
+#define I2S_LRC       27
+#define TFT_CS        15
+#define TFT_DC        2
+#define TFT_RST       14
+#define TFT_PWM       4
+#define ROTARY_PIN_A  33
+#define ROTARY_PIN_B  32
+#define ROTARY_PIN_BUTTON 13
+
+
+Audio *audio = new Audio;
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+
+time_t last_menu_activity = 0, last_encode = 0, last_button_press = 0, last_button_release = 0;
+uint16_t timeout_menu = 15000, debounce_rotary_encoder = 25, debounce_button = 300, button_hold_timeout =300;
+int8_t volume = 0, menu_index = 0, backlight_pwm = 10;
+uint8_t menu_items = 8, flags_reg = 0b00000100, text_color = 0, bckgrnd_color = 1, current_station_index = 0;
+
+uint16_t colors[] = { 0x0000, 0xFFFF, 0xF800, 0x07E0, 0x001F, 0x07FF, 0xF81F, 0xFFE0, 0xFC00 };
+                      
+char color_names[][8] PROGMEM = { "Black", "White", "Red", "Green", "Blue", "Cyan", "Magenta", "Yellow", "Orange" };
+
+const char stream_links[][40] PROGMEM =
+{ 
+  "http://stream.otvoreni.hr/otvoreni", "http://live.narodni.hr:8059/stream", "http://live.antenazagreb.hr:8000/stream",
+  "live.antenazagreb.hr:8015/stream", "http://s8.iqstreaming.com:8028/stream", "http://streams.extrafm.hr:8110/stream",
+  "http://c5.hostingcentar.com:8157/stream", "http://mcp1.mydataknox.com:8006/stream",
+};
+
+const char current_station[][24] PROGMEM =
+{ 
+  "Otvoreni radio", "Narodni radio", "Antena Zagreb", "Antena Zagreb MIX", "Bijelo Plavi Radio", 
+  "Extra FM", "Gold FM", "Radio Belisce"
+};
+
+void setup()
+{   
+    ledcSetup(0, 32000, 8);
+    ledcAttachPin(TFT_PWM, 0);
+    Serial.begin(115200);
+    SPI.begin(SPI_SCK, -1, SPI_MOSI, -1);
+    tft.initR(INITR_BLACKTAB);//initialize a ST7735S chip, black tab  
+    turnOnScreen();
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), password.c_str());
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(1500);
+    }
+    audio->setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+    audio->setVolume(volume); // 0...21
+    pinMode(ROTARY_PIN_BUTTON, INPUT_PULLUP);
+    pinMode(ROTARY_PIN_A, INPUT_PULLUP);
+    pinMode(ROTARY_PIN_B, INPUT_PULLUP);
+    delay(5);
+    attachInterrupt(ROTARY_PIN_A, volumeSet, CHANGE);
+    attachInterrupt(ROTARY_PIN_BUTTON, buttonPress, CHANGE);
+    setStation();
+}
+  
+void loop()
+{
+    audio->loop();
+    
+    if((last_menu_activity + timeout_menu < millis()) && (flags_reg & 0b01100000))
+    {
+        //flag_opened_menu = 0;
+        flags_reg &= 0b00011111;
+        //rotary_change = 1;
+        flags_reg |= (1 << 2);
+    }
+    
+    if(flags_reg & 1)
+    {
+        if((flags_reg & 0b00100000)) //Button_press and menu = 01
+        {
+          //flag_opened_menu = 0; 
+          flags_reg &= 0b00011111;
+          //flag_button_pressed = 0;
+          flags_reg &= ~(1);
+          //rotary_change = 1;
+          flags_reg |= (1 << 2);
+          current_station_index = menu_index;
+          setStation();
+        }
+        else if(((flags_reg & 0b01100000) == 0b00000000)) //Button_press and menu = 00
+        {
+          menu_index = 0;
+          //flag_opened_menu = 1; 
+          flags_reg |= (1 << 5);
+          flags_reg &= ~(1 << 6);
+          //flag_button_pressed = 0;
+          flags_reg &= ~(1);
+          //rotary_change = 1;
+          flags_reg |= (1 << 2);
+        }
+        else if(((flags_reg & 0b01100000) == 0b01000000)) //Button_press and menu = 10
+        {
+          if(menu_index < 9 && menu_index != bckgrnd_color)
+          {
+              text_color = menu_index;
+              flags_reg &= 0b00011111;
+              flags_reg &= ~(1);
+              flags_reg |= (1 << 2);
+          }
+          else if((menu_index - 9 != text_color) && (menu_index < 17))
+          {
+              bckgrnd_color = menu_index - 9;
+              flags_reg &= 0b00011111;
+              flags_reg &= ~(1);
+              flags_reg |= (1 << 2);
+          }
+          else if(menu_index = 18)
+          {
+              if(flags_reg & (1 << 7))
+              {
+                flags_reg &= ~(1 << 7);
+              }
+              else
+              {
+                flags_reg |= (1 << 7);
+              }
+              flags_reg |= (1 << 2);
+              flags_reg &= ~(1);
+          }
+        }
+    }
+    
+    
+    if(flags_reg & (1 << 1))
+    {
+      flags_reg &= ~(1 << 5);
+      flags_reg &= ~(1 << 1);
+      if(flags_reg & (1 << 6))
+      {
+        flags_reg &= 0b00011111;
+      }
+      else
+      {
+        flags_reg |= (1 << 6);
+      }
+      flags_reg |= (1 << 2);
+      menu_index = 0;
+    }
+
+    if(flags_reg & (1 << 2))
+    {
+        if((flags_reg & 0b01100000) & 0b00100000)
+        {
+            drawMenu();
+            last_menu_activity = millis();
+        }
+        
+        else if((flags_reg & 0b01100000) & 0b01000000)
+        {
+          if(menu_index <= 17)
+          {
+            drawColorChange();
+          }
+          else
+          {
+            
+            drawMenuOption();
+          }
+          last_menu_activity = millis();
+        }
+    
+        else 
+        {
+            audio->setVolume(volume); // 0...21
+            drawInfoScreen(); 
+        }
+        //rotary_change = 0;
+        flags_reg &= 0b11111011;
+    }
+    
+    //flag_prev_opened_menu = flag_opened_menu;
+    //flags_reg = (flags_reg & 0b11100111) | ((flags_reg & 0b01100000) >> 2);
+}
+
+void turnOnScreen()
+{
+    tft.setRotation(3);
+    tft.fillScreen(ST7735_WHITE);
+    tft.drawBitmap(0, 0, welcomeScreen, 160, 128, ST7735_MAGENTA);
+}
+
+void drawInfoScreen()
+{
+    tft.setRotation(3);
+    tft.fillScreen(colors[bckgrnd_color]);
+    tft.setCursor(5, 10);
+    tft.setTextSize(2);
+    tft.setTextColor(colors[text_color]);
+    tft.println("WiFi radio");
+    tft.setCursor(10, 30);
+    tft.setTextSize(1);
+    tft.println("Currently playing:");
+    tft.setCursor(20, 40);
+    tft.println(current_station[current_station_index]);
+
+    tft.drawRect(10, 100, 107, 25, colors[text_color]);
+    tft.fillRect(11, 101, 5 * volume, 23, colors[text_color]);
+    
+    if(volume == 0)
+    {
+      tft.drawBitmap(121, 102, speaker0, 30, 23, colors[text_color]);
+    }
+    else if(volume < 8)
+    {
+      tft.drawBitmap(121, 102, speaker1, 30, 23, colors[text_color]);
+    }
+    else if(volume < 15)
+    {
+      tft.drawBitmap(121, 102, speaker2, 30, 23, colors[text_color]);
+    }
+    else 
+    {
+      tft.drawBitmap(121, 102, speaker3, 30, 23, colors[text_color]);
+    }
+
+    tft.drawBitmap(130, 10, wifi_icon, 26, 18, colors[text_color]);
+    
+}
+
+void drawMenu()
+{
+  tft.setTextSize(1);
+  tft.setRotation(3);
+  tft.fillScreen(colors[bckgrnd_color]);
+  tft.setTextColor(colors[text_color]);
+  tft.setCursor(5, 10);
+  tft.print("Choose station: ");
+  int offset = menu_index - menu_index % 11;
+  uint8_t i =0;
+  while(i < 11 && (offset + i) < menu_items)
+  {
+    tft.setCursor(10, 11 * (i + 2));
+    tft.println(current_station[i + offset]);
+    i++;
+  }
+  tft.drawRect(8, 20 + menu_index * 11, 120, 11 , colors[text_color]);
+}
+
+void drawMenuOption()
+{
+  switch(menu_index)
+  {
+    case 18:
+      tft.setTextSize(2);
+      tft.setRotation(3);
+      tft.fillScreen(colors[bckgrnd_color]);
+      tft.setCursor(5, 10);
+      tft.setTextColor(colors[text_color]);
+      tft.print("Backlight: ");
+      if(~flags_reg & (1 << 7))
+      {
+        tft.setCursor(40, 50);
+        tft.setTextSize(4);
+        tft.setTextColor(colors[text_color]);
+        tft.drawRect(35, 45, 50, 43 , colors[text_color]);        
+        tft.print(backlight_pwm);
+      }
+      else
+      {
+        tft.setCursor(40, 50);
+        tft.setTextSize(4);
+        tft.setTextColor(colors[bckgrnd_color]);
+        tft.fillRect(35, 45, 50, 43 , colors[text_color]);
+        tft.print(backlight_pwm);
+      } 
+
+      break;
+    case 19:
+      
+
+
+      break;
+    default:
+      break;
+  }
+}
+
+void drawColorChange()
+{
+  tft.setTextSize(1);
+  tft.setRotation(3);
+  tft.fillScreen(colors[bckgrnd_color]);
+  tft.setTextColor(colors[text_color]);
+  tft.setCursor(5, 10);
+  if(menu_index >= 9)
+  {
+      menu_index -= 9;
+      tft.print("Choose background: ");
+      int offset = menu_index - menu_index % 11;
+      uint8_t i =0;
+      while(i < 11 && (offset + i) < sizeof(colors))
+      {
+        tft.setCursor(10, 11 * (i + 2));
+        tft.println(color_names[i + offset]);
+        i++;
+      }
+      tft.drawRect(8, 20 + menu_index * 11, 120, 11 , colors[text_color]);
+      menu_index += 9;
+  }
+  else
+  {
+      tft.print("Choose text color: ");
+      int offset = menu_index - menu_index % 11;
+      uint8_t i =0;
+      while(i < 11 && (offset + i) < sizeof(colors))
+      {
+        tft.setCursor(10, 11 * (i + 2));
+        tft.println(color_names[i + offset]);
+        i++;
+      }
+      tft.drawRect(8, 20 + menu_index * 11, 120, 11 , colors[text_color]);
+  }
+}
+
+void setStation()
+{
+    //audio->stopSong();
+    bool hostConnected = audio->connecttohost(stream_links[current_station_index]);
+    if(!hostConnected)
+    {
+      delete [] audio;
+      Audio *audio = new Audio;
+      audio->setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+      audio->setVolume(volume);
+      audio->connecttohost(stream_links[menu_index]);
+    }
+}
+
+
+// optional
+void audio_info(const char *info)
+{
+    Serial.print("info        ");
+    Serial.println(info);
+}
+
+void audio_id3data(const char *info)
+{  //id3 metadata
+    Serial.print("id3data     ");
+    Serial.println(info);
+}
+
+void audio_eof_mp3(const char *info)
+{  //end of file
+    Serial.print("eof_mp3     ");
+    Serial.println(info);
+}
+
+void audio_showstation(const char *info)
+{
+    Serial.print("station     ");
+    Serial.println(info);
+}
+
+void audio_showstreamtitle(const char *info)
+{
+    Serial.print("streamtitle ");
+    Serial.println(info);
+}
+
+void audio_bitrate(const char *info)
+{
+    Serial.print("bitrate     ");
+    Serial.println(info);
+}
+
+void audio_commercial(const char *info)
+{  //duration in sec
+    Serial.print("commercial  ");
+    Serial.println(info);
+}
+
+void audio_icyurl(const char *info)
+{  //homepage
+    Serial.print("icyurl      ");
+    Serial.println(info);
+}
+
+void audio_lasthost(const char *info)
+{  //stream URL played
+    Serial.print("lasthost    ");
+    Serial.println(info);
+}
+
+void volumeSet()
+{
+    if(last_encode + debounce_rotary_encoder < millis())
+      {
+        if((digitalRead(33) != digitalRead(32)))
+        {
+            if((flags_reg & 0b01100000) && (~flags_reg) & (1 << 7))
+            {
+                menu_index--;
+            }
+            else if((flags_reg & 0b01100000) && (flags_reg) & (1 << 7))
+            {
+                backlight_pwm--;
+            }
+            else
+            {
+                volume--;
+            }
+        }
+        
+        if (digitalRead(33) == digitalRead(32))
+        {
+            if((flags_reg & 0b01100000) && (~flags_reg) & (1 << 7))
+            {
+                menu_index++;
+            }
+            else if((flags_reg & 0b01100000) && (flags_reg) & (1 << 7))
+            {
+                backlight_pwm++;
+            }
+            else
+            {
+                volume++;
+            }
+        }
+        last_encode = millis();
+    }
+    
+    if(flags_reg & 0b00100000)
+    {
+        if(menu_index < 0)
+          menu_index = menu_items - 1;
+        if(menu_index > menu_items -1)
+          menu_index = 0;
+    }
+    else if(flags_reg & 0b01000000)
+    {
+      if(flags_reg & (1 << 7))
+      {
+        if(backlight_pwm < 0)
+          backlight_pwm = 0;
+        if(backlight_pwm > 20)
+          backlight_pwm = 20;
+        ledcWrite(0, 255 - backlight_pwm * 12);
+      }
+      else
+      {
+        if(menu_index < 0)
+          menu_index = 18;
+        if(menu_index > 18)
+          menu_index = 0;
+      }
+    }
+    else
+    {
+        if(volume < 0)
+          volume = 0;
+        if(volume > 21)
+          volume = 21;
+    }
+    flags_reg |= (1 << 2);
+}
+
+void buttonPress()
+{
+  Serial.println("Nezz ni ja");
+    if(last_button_release + debounce_button < millis())
+    {
+        if(digitalRead(ROTARY_PIN_BUTTON) == HIGH)
+        {
+            if(last_button_press + button_hold_timeout < millis())
+            {
+                flags_reg |= (1 << 1);
+                last_button_release = millis();
+            }
+            else
+            {
+                //flag_button_pressed = 1;
+                flags_reg |= 1;
+                last_button_release = millis();
+            }
+        }
+        else
+        {
+            last_button_press = millis();
+        }
+    }
+}
