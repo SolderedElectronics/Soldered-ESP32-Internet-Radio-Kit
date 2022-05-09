@@ -1,5 +1,10 @@
+@font-face {
+  font-family: 'Inter';
+  src: url('/inter.ttf') format('truetype');
+}
+
 html {
-  font-family: Arial, Helvetica, sans-serif; 
+  font-family: Inter, Inter, Regular; 
   display: inline-block; 
   text-align: center;
 }
@@ -15,7 +20,7 @@ p {
 
 .topnav { 
   overflow: hidden; 
-  background-color: #0A1128;
+  background-color: #582C83;
 }
 
 body {  
@@ -43,13 +48,14 @@ body {
 .card-title { 
   font-size: 1.2rem;
   font-weight: bold;
-  color: #034078
+  color: #25BAA8;
 }
 
 input[type=submit] {
+  font-family: Inter, Inter, Regular; 
   border: none;
   color: #FEFCFB;
-  background-color: #034078;
+  background-color: #25BAA8;
   padding: 15px 15px;
   text-align: center;
   text-decoration: none;
@@ -62,12 +68,14 @@ input[type=submit] {
   }
   
 a {
-	width: 150px;
+    text-decoration: none;
+    width: 150px;
 }
 button {
+  font-family: Inter, Inter, Regular; 
   border: none;
   color: #FEFCFB;
-  background-color: #034078;
+  background-color: #25BAA8;
   padding: 15px 15px;
   text-align: center;
   text-decoration: none;
@@ -80,58 +88,77 @@ button {
   }
 
 input[type=radio]:hover {
-	margin : 18px;
-	background-color: #1282A2;
+    margin : 18px;
+    background-color: #1282A2;
 }
   
 input[type=submit]:hover {
-	margin : 18px;
-	background-color: #1282A2;
+    margin : 18px;
+    background-color: #1282A2;
 }
 
 input[type=radio] {
-	margin : 18px;
+    margin : 18px;
 }
   
 input[type=submit] {
-	margin : 18px;
+    margin : 18px;
 }
 
 button:hover {
-  background-color: #1282A2;
+    background-color: #1282A2;
 }
 
 input[type=text], input[type=number], select {
-  width: 50%;
-  padding: 12px 20px;
-  margin: 18px;
-  display: inline-block;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-sizing: border-box;
+    width: 50%;
+    padding: 12px 20px;
+    margin: 18px;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
 }
 
 label {
-  font-size: 1.2rem; 
+    font-size: 1.2rem; 
 }
 .value{
-  font-size: 1.2rem;
-  color: #1282A2;  
+    font-size: 1.2rem;
+    color: #1282A2;  
 }
 .state {
-  font-size: 1.2rem;
-  color: #1282A2;
+    font-size: 1.2rem;
+    color: #1282A2;
 }
 
 .button-on {
-  background-color: #034078;
+    background-color: #25BAA8;
 }
 .button-on:hover {
-  background-color: #1282A2;
+    background-color: #1282A2;
 }
 .button-off {
-  background-color: #858585;
+    background-color: #858585;
 }
 .button-off:hover {
-  background-color: #252524;
+    background-color: #252524;
 } 
+.footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: #582C83;
+    color: white;
+    text-align: left;
+}
+
+.footer p{
+    margin-left: 5%;
+}
+
+.footer a{
+    color: white;
+}
+
+    
